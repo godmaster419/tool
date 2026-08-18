@@ -24,7 +24,186 @@ function parseHexColor(hex: string) {
   return { r: 0, g: 0, b: 0, alpha: 0 };
 }
 
-// ─── Core Image Processors ──────────────────────────────────────────
+// ─── Unified Multi-Tool Image Studio & Target KB Optimizer ──────────
+
+export interface UnifiedStudioOptions {
+  crop?: { left: number; top: number; width: number; height: number };
+  rotateAngle?: number;
+  flipDirection?: "none" | "horizontal" | "vertical" | "both";
+  resize?: {
+    width?: number;
+    height?: number;
+    scale?: number;
+    fit?: "cover" | "contain" | "fill" | "inside" | "outside";
+    maintainAspectRatio?: boolean;
+  };
+  targetSizeKb?: number;
+  format?: "jpeg" | "png" | "webp";
+  quality?: number;
+}
+
+export async function processUnifiedImageStudio(
+  inputBuffer: Buffer,
+  options: UnifiedStudioOptions
+) {
+  const originalMeta = await sharp(inputBuffer).metadata();
+  const origW = originalMeta.width || 800;
+  const origH = originalMeta.height || 600;
+
+  let pipeline = sharp(inputBuffer);
+
+  // 1. Interactive Crop
+  if (options.crop && options.crop.width > 0 && options.crop.height > 0) {
+    const left = Math.max(0, Math.min(origW - 1, Math.round(options.crop.left)));
+    const top = Math.max(0, Math.min(origH - 1, Math.round(options.crop.top)));
+    const width = Math.max(1, Math.min(origW - left, Math.round(options.crop.width)));
+    const height = Math.max(1, Math.min(origH - top, Math.round(options.crop.height)));
+    pipeline = pipeline.extract({ left, top, width, height });
+  }
+
+  // 2. Rotate
+  if (options.rotateAngle && options.rotateAngle !== 0) {
+    pipeline = pipeline.rotate(options.rotateAngle, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+  }
+
+  // 3. Flip / Flop
+  if (options.flipDirection === "horizontal" || options.flipDirection === "both") {
+    pipeline = pipeline.flop();
+  }
+  if (options.flipDirection === "vertical" || options.flipDirection === "both") {
+    pipeline = pipeline.flip();
+  }
+
+  // Intermediate buffer after crop/rotate/flip
+  let transformedBuffer = await pipeline.toBuffer();
+  const currentMeta = await sharp(transformedBuffer).metadata();
+  const currentW = currentMeta.width || origW;
+  const currentH = currentMeta.height || origH;
+
+  // 4. Resize with Sliders
+  let targetWidth = currentW;
+  let targetHeight = currentH;
+
+  if (options.resize) {
+    if (options.resize.scale && options.resize.scale !== 100) {
+      const factor = options.resize.scale / 100;
+      targetWidth = Math.max(16, Math.round(currentW * factor));
+      targetHeight = Math.max(16, Math.round(currentH * factor));
+    } else if (options.resize.width || options.resize.height) {
+      if (options.resize.width && options.resize.height) {
+        targetWidth = Math.max(16, Math.round(options.resize.width));
+        targetHeight = Math.max(16, Math.round(options.resize.height));
+      } else if (options.resize.width) {
+        targetWidth = Math.max(16, Math.round(options.resize.width));
+        targetHeight = options.resize.maintainAspectRatio !== false
+          ? Math.round(currentH * (targetWidth / currentW))
+          : currentH;
+      } else if (options.resize.height) {
+        targetHeight = Math.max(16, Math.round(options.resize.height));
+        targetWidth = options.resize.maintainAspectRatio !== false
+          ? Math.round(currentW * (targetHeight / currentH))
+          : currentW;
+      }
+    }
+  }
+
+  // 5. Format & Target File Size (KB/MB) Optimization
+  const targetFormat = options.format || (originalMeta.format === "png" ? "png" : "jpeg");
+  let outputQuality = options.quality || 85;
+  let finalBuffer: Buffer;
+
+  if (options.targetSizeKb && options.targetSizeKb > 0) {
+    const targetBytes = options.targetSizeKb * 1024;
+    const formatForTarget = targetFormat === "png" && options.targetSizeKb < 150 ? "jpeg" : targetFormat;
+
+    // Binary search for optimal quality between 5 and 95
+    let lowQ = 5;
+    let highQ = 95;
+    let bestBuffer: Buffer | null = null;
+    let currentScale = 1.0;
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const midQ = Math.round((lowQ + highQ) / 2);
+      const testW = Math.round(targetWidth * currentScale);
+      const testH = Math.round(targetHeight * currentScale);
+
+      let testPipeline = sharp(transformedBuffer).resize(testW, testH, {
+        fit: options.resize?.fit || "fill",
+        withoutEnlargement: false,
+      });
+
+      if (formatForTarget === "jpeg") {
+        testPipeline = testPipeline.jpeg({ quality: midQ, mozjpeg: true });
+      } else if (formatForTarget === "webp") {
+        testPipeline = testPipeline.webp({ quality: midQ, effort: 5 });
+      } else {
+        testPipeline = testPipeline.png({ compressionLevel: 9, palette: midQ < 60 });
+      }
+
+      const testBuf = await testPipeline.toBuffer();
+
+      if (testBuf.length <= targetBytes) {
+        bestBuffer = testBuf;
+        lowQ = midQ + 1; // Try higher quality
+      } else {
+        highQ = midQ - 1; // Needs lower quality
+      }
+
+      // If even at minimum quality it exceeds target size, reduce resolution scale
+      if (highQ < lowQ && !bestBuffer && currentScale > 0.3) {
+        currentScale *= 0.8;
+        lowQ = 10;
+        highQ = 80;
+      }
+    }
+
+    if (bestBuffer) {
+      finalBuffer = bestBuffer;
+    } else {
+      // Fallback to highest compression
+      finalBuffer = await sharp(transformedBuffer)
+        .resize(Math.round(targetWidth * 0.5), Math.round(targetHeight * 0.5))
+        .jpeg({ quality: 20, mozjpeg: true })
+        .toBuffer();
+    }
+  } else {
+    // Normal single-pass render
+    let renderPipeline = sharp(transformedBuffer).resize(targetWidth, targetHeight, {
+      fit: options.resize?.fit || "fill",
+      withoutEnlargement: false,
+    });
+
+    if (targetFormat === "jpeg") {
+      renderPipeline = renderPipeline.jpeg({ quality: outputQuality, mozjpeg: true });
+    } else if (targetFormat === "webp") {
+      renderPipeline = renderPipeline.webp({ quality: outputQuality });
+    } else {
+      renderPipeline = renderPipeline.png({ quality: outputQuality, compressionLevel: 8 });
+    }
+
+    finalBuffer = await renderPipeline.toBuffer();
+  }
+
+  const finalMeta = await sharp(finalBuffer).metadata();
+
+  return {
+    buffer: finalBuffer,
+    metadata: {
+      originalWidth: origW,
+      originalHeight: origH,
+      finalWidth: finalMeta.width || targetWidth,
+      finalHeight: finalMeta.height || targetHeight,
+      originalSize: inputBuffer.length,
+      originalSizeKb: Math.round(inputBuffer.length / 1024),
+      finalSize: finalBuffer.length,
+      finalSizeKb: Math.round(finalBuffer.length / 1024),
+      targetSizeKb: options.targetSizeKb || null,
+      savings: Math.round((1 - finalBuffer.length / inputBuffer.length) * 100),
+      format: targetFormat,
+    },
+  };
+}
+
 
 export async function resizeImage(
   inputBuffer: Buffer,

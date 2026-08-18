@@ -163,10 +163,22 @@ def main():
                          data={"layout": "grid", "cols": "2"}):
         passed += 1
 
-    # AI Background Remover
+    # 4. Test Unified Multi-Tool Studio API
+    print("\n--- 4. Testing Unified All-in-One Studio API ---")
+
+    # Unified Studio: Crop + Flip + Rotate + Slider Resize
     total += 1
-    if test_api_endpoint("AI Background Remover API", "POST", "/api/advanced/bg-remove",
-                         files={"file": ("sample.png", sample_png, "image/png")}):
+    studio_options = {
+        "crop": {"left": 10, "top": 10, "width": 200, "height": 150},
+        "rotateAngle": 90,
+        "flipDirection": "horizontal",
+        "resize": {"width": 300, "height": 200, "maintainAspectRatio": True},
+        "targetSizeKb": 40,
+        "format": "jpeg",
+    }
+    if test_api_endpoint("Unified Studio (Crop+Flip+Rotate+Resize+TargetKB)", "POST", "/api/image/studio",
+                         files={"file": ("sample.png", sample_png, "image/png")},
+                         data={"options": json.dumps(studio_options)}):
         passed += 1
 
     print("\n" + "=" * 60)
