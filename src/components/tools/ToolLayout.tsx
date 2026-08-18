@@ -24,7 +24,7 @@ export default function ToolLayout({
   backLabel = "All Tools",
 }: ToolLayoutProps) {
   return (
-    <div className="min-h-screen pt-24 pb-16 px-6">
+    <div className="min-h-screen pt-36 sm:pt-40 pb-32 sm:pb-36 px-6">
       <div className="max-w-4xl mx-auto">
         {/* Back navigation */}
         <motion.div
