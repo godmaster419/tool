@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
   },
 
   // Allow local network IP access in dev
-  allowedDevOrigins: ["10.110.168.223", "localhost", "127.0.0.1"],
+  allowedDevOrigins: ["10.18.125.223", "10.110.168.223", "localhost", "127.0.0.1"],
 
   // Image optimization
   images: {
