@@ -1,0 +1,17 @@
+# ========================================
+# Media & Document Utility Suite
+# Python Processor Dependencies
+# ========================================
+
+# Image Processing
+Pillow>=10.4.0
+opencv-python-headless>=4.10.0
+
+# Video Processing
+moviepy>=2.1.0
+
+# AI Background Removal (U2Net model)
+rembg>=2.0.60
+
+# Utility
+numpy>=1.26.0
