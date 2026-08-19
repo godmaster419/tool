@@ -130,7 +130,7 @@ export async function processUnifiedImageStudio(
       const testH = Math.max(16, Math.round(targetHeight * currentScale));
 
       let testPipeline = sharp(transformedBuffer).resize(testW, testH, {
-        fit: options.resize?.fit || "fill",
+        fit: options.resize?.maintainAspectRatio !== false ? "inside" : "fill",
         kernel: sharp.kernel.lanczos3,
         withoutEnlargement: false,
       });
@@ -169,6 +169,7 @@ export async function processUnifiedImageStudio(
       // Fallback
       let fallbackPipeline = sharp(transformedBuffer)
         .resize(Math.max(16, Math.round(targetWidth * 0.5)), Math.max(16, Math.round(targetHeight * 0.5)), {
+          fit: options.resize?.maintainAspectRatio !== false ? "inside" : "fill",
           kernel: sharp.kernel.lanczos3,
         });
       if (currentMeta.hasAlpha) {
@@ -179,7 +180,7 @@ export async function processUnifiedImageStudio(
   } else {
     // Normal single-pass render
     let renderPipeline = sharp(transformedBuffer).resize(targetWidth, targetHeight, {
-      fit: options.resize?.fit || "fill",
+      fit: options.resize?.maintainAspectRatio !== false ? "inside" : "fill",
       kernel: sharp.kernel.lanczos3,
       withoutEnlargement: false,
     });

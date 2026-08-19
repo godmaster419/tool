@@ -141,6 +141,17 @@ export default function ImageStudioEditor({
       const next = (prev + deg) % 360;
       return next < -180 ? next + 360 : next > 180 ? next - 360 : next;
     });
+
+    if (Math.abs(deg) === 90 || Math.abs(deg) === 270) {
+      setNaturalWidth((prevW) => {
+        setNaturalHeight(prevW);
+        return naturalHeight;
+      });
+      setTargetWidth((prevW) => {
+        setTargetHeight(prevW);
+        return targetHeight;
+      });
+    }
   };
 
   // Aspect presets for crop
