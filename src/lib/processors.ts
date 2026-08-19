@@ -46,24 +46,26 @@ export async function processUnifiedImageStudio(
   inputBuffer: Buffer,
   options: UnifiedStudioOptions
 ) {
-  const originalMeta = await sharp(inputBuffer).metadata();
+  // Normalize EXIF orientation first
+  let pipeline = sharp(inputBuffer).rotate();
+  const originalMeta = await pipeline.metadata();
   const origW = originalMeta.width || 800;
   const origH = originalMeta.height || 600;
 
-  let pipeline = sharp(inputBuffer);
-
-  // 1. Interactive Crop
+  // 1. Interactive Crop with Safe Clamping
   if (options.crop && options.crop.width > 0 && options.crop.height > 0) {
-    const left = Math.max(0, Math.min(origW - 1, Math.round(options.crop.left)));
-    const top = Math.max(0, Math.min(origH - 1, Math.round(options.crop.top)));
+    const left = Math.max(0, Math.min(origW - 2, Math.round(options.crop.left)));
+    const top = Math.max(0, Math.min(origH - 2, Math.round(options.crop.top)));
     const width = Math.max(1, Math.min(origW - left, Math.round(options.crop.width)));
     const height = Math.max(1, Math.min(origH - top, Math.round(options.crop.height)));
     pipeline = pipeline.extract({ left, top, width, height });
   }
 
-  // 2. Rotate
+  // 2. Rotate with Smooth Anti-Aliasing
   if (options.rotateAngle && options.rotateAngle !== 0) {
-    pipeline = pipeline.rotate(options.rotateAngle, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+    pipeline = pipeline.rotate(options.rotateAngle, {
+      background: options.format === "jpeg" ? { r: 255, g: 255, b: 255, alpha: 1 } : { r: 0, g: 0, b: 0, alpha: 0 },
+    });
   }
 
   // 3. Flip / Flop
@@ -74,7 +76,7 @@ export async function processUnifiedImageStudio(
     pipeline = pipeline.flip();
   }
 
-  // Intermediate buffer after crop/rotate/flip
+  // Intermediate buffer after transformations
   let transformedBuffer = await pipeline.toBuffer();
   const currentMeta = await sharp(transformedBuffer).metadata();
   const currentW = currentMeta.width || origW;
@@ -124,18 +126,22 @@ export async function processUnifiedImageStudio(
 
     for (let attempt = 0; attempt < 12; attempt++) {
       const midQ = Math.round((lowQ + highQ) / 2);
-      const testW = Math.round(targetWidth * currentScale);
-      const testH = Math.round(targetHeight * currentScale);
+      const testW = Math.max(16, Math.round(targetWidth * currentScale));
+      const testH = Math.max(16, Math.round(targetHeight * currentScale));
 
       let testPipeline = sharp(transformedBuffer).resize(testW, testH, {
         fit: options.resize?.fit || "fill",
+        kernel: sharp.kernel.lanczos3,
         withoutEnlargement: false,
       });
 
       if (formatForTarget === "jpeg") {
+        if (currentMeta.hasAlpha) {
+          testPipeline = testPipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
+        }
         testPipeline = testPipeline.jpeg({ quality: midQ, mozjpeg: true });
       } else if (formatForTarget === "webp") {
-        testPipeline = testPipeline.webp({ quality: midQ, effort: 5 });
+        testPipeline = testPipeline.webp({ quality: midQ, effort: 4 });
       } else {
         testPipeline = testPipeline.png({ compressionLevel: 9, palette: midQ < 60 });
       }
@@ -151,7 +157,7 @@ export async function processUnifiedImageStudio(
 
       // If even at minimum quality it exceeds target size, reduce resolution scale
       if (highQ < lowQ && !bestBuffer && currentScale > 0.3) {
-        currentScale *= 0.8;
+        currentScale *= 0.82;
         lowQ = 10;
         highQ = 80;
       }
@@ -160,20 +166,28 @@ export async function processUnifiedImageStudio(
     if (bestBuffer) {
       finalBuffer = bestBuffer;
     } else {
-      // Fallback to highest compression
-      finalBuffer = await sharp(transformedBuffer)
-        .resize(Math.round(targetWidth * 0.5), Math.round(targetHeight * 0.5))
-        .jpeg({ quality: 20, mozjpeg: true })
-        .toBuffer();
+      // Fallback
+      let fallbackPipeline = sharp(transformedBuffer)
+        .resize(Math.max(16, Math.round(targetWidth * 0.5)), Math.max(16, Math.round(targetHeight * 0.5)), {
+          kernel: sharp.kernel.lanczos3,
+        });
+      if (currentMeta.hasAlpha) {
+        fallbackPipeline = fallbackPipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
+      }
+      finalBuffer = await fallbackPipeline.jpeg({ quality: 25, mozjpeg: true }).toBuffer();
     }
   } else {
     // Normal single-pass render
     let renderPipeline = sharp(transformedBuffer).resize(targetWidth, targetHeight, {
       fit: options.resize?.fit || "fill",
+      kernel: sharp.kernel.lanczos3,
       withoutEnlargement: false,
     });
 
     if (targetFormat === "jpeg") {
+      if (currentMeta.hasAlpha) {
+        renderPipeline = renderPipeline.flatten({ background: { r: 255, g: 255, b: 255 } });
+      }
       renderPipeline = renderPipeline.jpeg({ quality: outputQuality, mozjpeg: true });
     } else if (targetFormat === "webp") {
       renderPipeline = renderPipeline.webp({ quality: outputQuality });
@@ -215,16 +229,17 @@ export async function resizeImage(
   }
 ) {
   const { width = 800, height, fit = "inside", maintainAspectRatio = true } = options;
-  const originalMeta = await sharp(inputBuffer).metadata();
+  const originalMeta = await sharp(inputBuffer).rotate().metadata();
 
   const resizeOptions: ResizeOptions = {
     width: Math.round(width),
     height: height ? Math.round(height) : undefined,
     fit: maintainAspectRatio ? fit : "fill",
+    kernel: sharp.kernel.lanczos3,
     withoutEnlargement: false,
   };
 
-  const result = await sharp(inputBuffer).resize(resizeOptions).toBuffer();
+  const result = await sharp(inputBuffer).rotate().resize(resizeOptions).toBuffer();
   const newMeta = await sharp(result).metadata();
 
   return {
@@ -244,12 +259,22 @@ export async function cropImage(
   inputBuffer: Buffer,
   options: { left?: number; top?: number; width?: number; height?: number; x?: number; y?: number }
 ) {
-  const left = Math.max(0, Math.round(options.left ?? options.x ?? 0));
-  const top = Math.max(0, Math.round(options.top ?? options.y ?? 0));
-  const width = Math.max(1, Math.round(options.width ?? 100));
-  const height = Math.max(1, Math.round(options.height ?? 100));
+  const meta = await sharp(inputBuffer).rotate().metadata();
+  const origW = meta.width || 800;
+  const origH = meta.height || 600;
+
+  const rawLeft = Math.round(options.left ?? options.x ?? 0);
+  const rawTop = Math.round(options.top ?? options.y ?? 0);
+  const rawWidth = Math.round(options.width ?? 100);
+  const rawHeight = Math.round(options.height ?? 100);
+
+  const left = Math.max(0, Math.min(origW - 2, rawLeft));
+  const top = Math.max(0, Math.min(origH - 2, rawTop));
+  const width = Math.max(1, Math.min(origW - left, rawWidth));
+  const height = Math.max(1, Math.min(origH - top, rawHeight));
 
   const result = await sharp(inputBuffer)
+    .rotate()
     .extract({ left, top, width, height })
     .toBuffer();
 
@@ -261,7 +286,7 @@ export async function flipImage(
   options: { direction?: "horizontal" | "vertical" | "both" }
 ) {
   const { direction = "horizontal" } = options;
-  let pipeline = sharp(inputBuffer);
+  let pipeline = sharp(inputBuffer).rotate();
 
   if (direction === "horizontal" || direction === "both") {
     pipeline = pipeline.flop();
@@ -372,15 +397,15 @@ export async function extractColors(
   inputBuffer: Buffer,
   options: { count?: number } = {}
 ) {
-  const { count = 6 } = options;
+  const { count = 8 } = options;
   const { data, info } = await sharp(inputBuffer)
-    .resize(100, 100, { fit: "cover" })
+    .resize(120, 120, { fit: "cover" })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
   const colorMap = new Map<string, number>();
-  const binSize = 32;
+  const binSize = 24; // Finer color quantization for accurate tone capture
 
   for (let i = 0; i < data.length; i += 3) {
     const r = Math.round(data[i] / binSize) * binSize;
@@ -397,8 +422,9 @@ export async function extractColors(
 
   const colors = sorted.map(([key, freq]) => {
     const [r, g, b] = key.split(",").map(Number);
+    const hex = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
     return {
-      hex: `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`,
+      hex,
       rgb: { r, g, b },
       percentage: Math.round((freq / totalPixels) * 100),
     };
@@ -460,22 +486,36 @@ export async function convertSvg(
   } = {}
 ) {
   const { format = "png", width, height, density = 150, quality = 90 } = options;
-  let pipeline = sharp(inputBuffer, { density });
+
+  // 1. Sanitize SVG and add fallback viewBox if missing
+  let svgStr = inputBuffer.toString("utf8");
+  svgStr = svgStr
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+    .replace(/on\w+="[^"]*"/gi, "")
+    .replace(/on\w+='[^']*'/gi, "");
+
+  if (!svgStr.includes("viewBox") && !svgStr.includes("viewbox")) {
+    svgStr = svgStr.replace(/<svg\b/i, '<svg viewBox="0 0 800 600" ');
+  }
+
+  const safeBuffer = Buffer.from(svgStr, "utf8");
+  let pipeline = sharp(safeBuffer, { density });
 
   if (width || height) {
     pipeline = pipeline.resize({
       width: width ? Math.round(width) : undefined,
       height: height ? Math.round(height) : undefined,
       fit: "inside",
+      kernel: sharp.kernel.lanczos3,
     });
   }
 
   if (format === "jpeg" || format === "jpg") {
-    pipeline = pipeline.flatten({ background: "#ffffff" }).jpeg({ quality });
+    pipeline = pipeline.flatten({ background: "#ffffff" }).jpeg({ quality, mozjpeg: true });
   } else if (format === "webp") {
     pipeline = pipeline.webp({ quality });
   } else {
-    pipeline = pipeline.png();
+    pipeline = pipeline.png({ compressionLevel: 8 });
   }
 
   const result = await pipeline.toBuffer();
@@ -507,6 +547,7 @@ export async function heicToJpg(
       quality: quality / 100,
     });
     const result = await sharp(Buffer.from(jpegBuffer))
+      .toColorspace("srgb")
       .jpeg({ quality, mozjpeg: true })
       .toBuffer();
     const metadata = await sharp(result).metadata();
@@ -521,7 +562,10 @@ export async function heicToJpg(
       },
     };
   } catch {
-    const result = await sharp(inputBuffer).jpeg({ quality }).toBuffer();
+    const result = await sharp(inputBuffer)
+      .toColorspace("srgb")
+      .jpeg({ quality, mozjpeg: true })
+      .toBuffer();
     const metadata = await sharp(result).metadata();
     return {
       buffer: result,
@@ -553,18 +597,21 @@ export async function imagesToPdf(
   const pdfDoc = await PDFDocument.create();
 
   for (const imgBuffer of buffers) {
-    const metadata = await sharp(imgBuffer).metadata();
-    const format = metadata.format;
+    const rawMeta = await sharp(imgBuffer).metadata();
+    const isPng = rawMeta.format === "png" && !rawMeta.hasAlpha;
 
-    let processedBuffer: Buffer;
     let image;
-
-    if (format === "png") {
-      processedBuffer = imgBuffer;
-      image = await pdfDoc.embedPng(processedBuffer);
+    if (isPng) {
+      const cleanPng = await sharp(imgBuffer).png().toBuffer();
+      image = await pdfDoc.embedPng(cleanPng);
     } else {
-      processedBuffer = await sharp(imgBuffer).jpeg({ quality: 95 }).toBuffer();
-      image = await pdfDoc.embedJpg(processedBuffer);
+      // Flatten any transparency to pure white and normalize color space to sRGB
+      const cleanJpg = await sharp(imgBuffer)
+        .flatten({ background: { r: 255, g: 255, b: 255 } })
+        .toColorspace("srgb")
+        .jpeg({ quality: 92, mozjpeg: true })
+        .toBuffer();
+      image = await pdfDoc.embedJpg(cleanJpg);
     }
 
     const imgWidth = image.width;
@@ -576,8 +623,14 @@ export async function imagesToPdf(
       pageHeight = imgHeight + margin * 2;
     } else {
       const preset = pageSizes[pageSize] || pageSizes.a4;
-      pageWidth = preset.width;
-      pageHeight = preset.height;
+      // Auto-orient page to landscape if image is wide
+      if (imgWidth > imgHeight) {
+        pageWidth = preset.height;
+        pageHeight = preset.width;
+      } else {
+        pageWidth = preset.width;
+        pageHeight = preset.height;
+      }
     }
 
     const page = pdfDoc.addPage([pageWidth, pageHeight]);
@@ -611,7 +664,20 @@ export async function compressPdf(
   options: { level?: "low" | "medium" | "high" } = {}
 ) {
   const { level = "medium" } = options;
-  const pdfDoc = await PDFDocument.load(inputBuffer, { updateMetadata: false });
+  let pdfDoc: PDFDocument;
+
+  try {
+    pdfDoc = await PDFDocument.load(inputBuffer, {
+      updateMetadata: false,
+      ignoreEncryption: false,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.includes("encrypt") || msg.includes("password")) {
+      throw new Error("This PDF is password-protected or encrypted. Please remove the password before compressing.");
+    }
+    throw new Error("Invalid or corrupted PDF file. Please ensure the file is a standard PDF.");
+  }
 
   if (level === "high") {
     pdfDoc.setTitle("");
@@ -635,7 +701,6 @@ export async function compressPdf(
       compressedSize: result.length,
       savings: Math.max(0, Math.round((1 - result.length / inputBuffer.length) * 100)),
       pageCount: pdfDoc.getPageCount(),
-      level,
     },
   };
 }
@@ -647,9 +712,18 @@ export async function ocrImage(
   options: { language?: string } = {}
 ) {
   const { language = "eng" } = options;
+
+  // Pre-process image for optimal OCR recognition (grayscale + contrast normalization + sharpen)
+  const preprocessedBuffer = await sharp(inputBuffer)
+    .rotate()
+    .grayscale()
+    .normalize()
+    .sharpen({ sigma: 1.5 })
+    .toBuffer();
+
   const Tesseract = (await import("tesseract.js")).default || (await import("tesseract.js"));
   const worker = await Tesseract.createWorker(language);
-  const { data } = await worker.recognize(inputBuffer);
+  const { data } = await worker.recognize(preprocessedBuffer);
   await worker.terminate();
 
   return {
@@ -673,21 +747,49 @@ export async function generateNativeMeme(
   bottomText: string = "",
   fontSizeRatio: number = 0.08
 ) {
-  const meta = await sharp(inputBuffer).metadata();
+  const meta = await sharp(inputBuffer).rotate().metadata();
   const width = meta.width || 800;
   const height = meta.height || 600;
   const fontSize = Math.max(24, Math.round(height * fontSizeRatio));
 
   const sanitize = (t: string) =>
-    t.toUpperCase().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    t
+      .toUpperCase()
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
 
-  const topSvg = topText
-    ? `<text x="50%" y="${fontSize + 15}" text-anchor="middle" font-family="Impact, sans-serif" font-size="${fontSize}px" font-weight="900" fill="white" stroke="black" stroke-width="${Math.max(3, fontSize / 12)}px">${sanitize(topText)}</text>`
-    : "";
+  // Helper for multi-line SVG text
+  const formatSvgText = (text: string, yStart: number) => {
+    if (!text.trim()) return "";
+    const words = text.split(" ");
+    const lines: string[] = [];
+    let currentLine = "";
 
-  const bottomSvg = bottomText
-    ? `<text x="50%" y="${height - 25}" text-anchor="middle" font-family="Impact, sans-serif" font-size="${fontSize}px" font-weight="900" fill="white" stroke="black" stroke-width="${Math.max(3, fontSize / 12)}px">${sanitize(bottomText)}</text>`
-    : "";
+    for (const w of words) {
+      if ((currentLine + " " + w).length > 28) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = w;
+      } else {
+        currentLine = currentLine ? `${currentLine} ${w}` : w;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    return lines
+      .map(
+        (line, idx) =>
+          `<text x="50%" y="${yStart + idx * (fontSize * 1.15)}" text-anchor="middle" font-family="Impact, Arial Black, sans-serif" font-size="${fontSize}px" font-weight="900" fill="white" stroke="black" stroke-width="${Math.max(3, fontSize / 10)}px" paint-order="stroke fill">${sanitize(line)}</text>`
+      )
+      .join("\n");
+  };
+
+  const topSvg = formatSvgText(topText, fontSize + 15);
+  const bottomLinesCount = bottomText.length > 28 ? Math.ceil(bottomText.length / 28) : 1;
+  const bottomStartY = height - 25 - (bottomLinesCount - 1) * (fontSize * 1.15);
+  const bottomSvg = formatSvgText(bottomText, bottomStartY);
 
   const overlaySvg = Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -697,8 +799,9 @@ export async function generateNativeMeme(
   `);
 
   const result = await sharp(inputBuffer)
+    .rotate()
     .composite([{ input: overlaySvg, top: 0, left: 0 }])
-    .jpeg({ quality: 92 })
+    .jpeg({ quality: 92, mozjpeg: true })
     .toBuffer();
 
   return {
@@ -733,6 +836,7 @@ export async function generateNativeCollage(
 
   const count = imageBuffers.length;
   if (count === 0) throw new Error("No images provided");
+  if (count > 16) throw new Error("Please select up to 16 images for collage generation to maintain performance.");
 
   let computedCols = cols;
   let computedRows = Math.ceil(count / cols);
@@ -755,7 +859,8 @@ export async function generateNativeCollage(
     const col = idx % computedCols;
 
     const cellImg = await sharp(imageBuffers[idx])
-      .resize(cellWidth, cellHeight, { fit: "cover" })
+      .rotate()
+      .resize(cellWidth, cellHeight, { fit: "cover", kernel: sharp.kernel.lanczos3 })
       .toBuffer();
 
     composites.push({
