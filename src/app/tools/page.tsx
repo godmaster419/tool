@@ -20,7 +20,7 @@ export default function ToolsDirectoryPage() {
   });
 
   return (
-    <div className="min-h-screen pt-36 sm:pt-40 pb-32 px-6 sm:px-10 lg:px-16">
+    <main className="min-h-screen pt-28 sm:pt-32 pb-24">
       <div className="w-full max-w-[1650px] mx-auto">
         {/* Page Heading — Single Clean Straight Line, Smaller Size */}
         <div className="text-center max-w-3xl mx-auto mb-8">
@@ -197,6 +197,6 @@ export default function ToolsDirectoryPage() {
           })}
         </div>
       </div>
-    </div>
+    </main>
   );
 }

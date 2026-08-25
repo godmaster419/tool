@@ -35,7 +35,7 @@ export default function ToolLayout({
   }));
 
   return (
-    <div className="min-h-screen pt-32 sm:pt-36 pb-32 sm:pb-36 px-6">
+    <main className="min-h-screen pt-28 sm:pt-32 pb-24">
       <div className="max-w-5xl mx-auto">
         {/* Breadcrumb Trail */}
         <motion.nav
@@ -113,6 +113,6 @@ export default function ToolLayout({
           {children}
         </motion.div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function DisclaimerPage() {
   return (
-    <div className="min-h-screen pt-36 sm:pt-40 pb-32 sm:pb-36 px-6">
+    <main className="min-h-screen pt-28 sm:pt-32 pb-24">
       <div className="max-w-3xl mx-auto">
         <Link
           href="/"
@@ -54,6 +54,6 @@ export default function DisclaimerPage() {
           </section>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
