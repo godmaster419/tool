@@ -18,9 +18,9 @@ function HeroSection() {
       className="
         relative isolate overflow-hidden
         px-4 sm:px-6 lg:px-8
-        min-h-[calc(100vh-76px)] sm:min-h-[calc(100vh-80px)]
+        min-h-[74vh] sm:min-h-[78vh]
         flex flex-col items-center justify-center
-        py-12 sm:py-16 lg:py-20
+        py-10 sm:py-14 lg:py-16
       "
     >
       {/* Ambient background */}
@@ -274,13 +274,14 @@ function CategoriesSection() {
       className="
         relative w-full scroll-mt-24
         px-4 pb-28
+        mt-[-16px] sm:mt-[-28px] lg:mt-[-36px]
         sm:px-6 sm:pb-32
         lg:px-8 lg:pb-36
       "
     >
       <div className="mx-auto w-full max-w-[1440px]">
         {/* Section header */}
-        <div className="mx-auto mb-8 max-w-2xl text-center sm:mb-10 lg:mb-12">
+        <div className="mx-auto mb-6 max-w-2xl text-center sm:mb-8 lg:mb-10">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             whileInView={{ opacity: 1, y: 0 }}
