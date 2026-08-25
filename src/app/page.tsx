@@ -18,8 +18,9 @@ function HeroSection() {
       className="
         relative isolate overflow-hidden
         px-4 sm:px-6 lg:px-8
-        pt-28 sm:pt-32 lg:pt-36
-        pb-16 sm:pb-20 lg:pb-24
+        min-h-[calc(100vh-76px)] sm:min-h-[calc(100vh-80px)]
+        flex flex-col items-center justify-center
+        py-12 sm:py-16 lg:py-20
       "
     >
       {/* Ambient background */}
@@ -36,7 +37,7 @@ function HeroSection() {
       <div
         aria-hidden="true"
         className="
-          pointer-events-none absolute left-1/2 top-[42%]
+          pointer-events-none absolute left-1/2 top-1/2
           hidden -translate-x-1/2 -translate-y-1/2 opacity-30
           sm:block
         "

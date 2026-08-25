@@ -39,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={`dark ${spaceGrotesk.className}`}>
       <body className="bg-void text-text-primary antialiased font-sans">
-        <div className="relative min-h-screen bg-grid bg-radial-glow">
+        <div className="relative flex flex-col min-h-screen bg-grid bg-radial-glow">
           {/* Interactive particle background */}
           <ParticleField />
 
@@ -47,7 +47,7 @@ export default function RootLayout({
           <Navbar />
 
           {/* Page content */}
-          <div className="relative z-10">
+          <div className="relative z-10 flex-1 flex flex-col">
             {children}
             <SpeedInsights />
           </div>

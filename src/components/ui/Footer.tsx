@@ -28,7 +28,7 @@ export default function Footer() {
   ];
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-30 bg-void/95 backdrop-blur-2xl border-t border-glass-border shadow-[0_-12px_40px_rgba(0,0,0,0.85)] min-h-[76px] sm:min-h-[82px] flex items-center">
+    <footer className="relative w-full z-30 bg-void/95 backdrop-blur-2xl border-t border-glass-border shadow-[0_-12px_40px_rgba(0,0,0,0.85)] min-h-[76px] sm:min-h-[82px] flex items-center mt-auto">
       {/* Top glowing ambient highlight line */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-6xl h-[1.5px] bg-gradient-to-r from-transparent via-neon-purple/60 to-transparent pointer-events-none" />
 
